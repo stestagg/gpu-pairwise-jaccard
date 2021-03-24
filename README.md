@@ -1,2 +1,2 @@
 # gpu-pairwise-jaccard
-Numba-cuda implementatino of pairwise jaccard distance metric
+`numba.cuda` implementation of various pairwise distance metrics
