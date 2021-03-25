@@ -1,10 +1,11 @@
 import pytest
 from gpu_pairwise.boolean import pairwise_distance
-from scipy.spatial.distance import cdist
+from scipy.spatial.distance import cdist, squareform
 import numpy as np
 from numpy.testing import assert_allclose
 
-METRICS = [
+
+SCIPY_METRICS = [
     'jaccard', 
     'matching', 
     'hamming',
@@ -16,9 +17,61 @@ METRICS = [
     'sokalsneath',
 ]
 
+
 def test_simple_call():
     distances = pairwise_distance([[1, 0], [1, 1]])
     assert (distances == [[0, 0.5], [0.5, 0]]).all()
+
+
+def test_squareform():
+    distances = pairwise_distance([
+        [0, 0],
+        [1, 0],
+        [0, 0],
+        [1, 1],
+        [1, 0],
+        [0, 0],
+    ], metric='equal', out_dtype='bool', squareform=True)
+
+    assert (list(distances) == [
+        False, True, False, False, True, 
+        False, False, True, False, 
+        False, False, True, 
+        False, False,
+        False
+    ])
+
+
+def test_squareform_jaccard():
+    data = [
+        [0, 0, 1],
+        [0, 1, 1],
+        [1, 1, 1],
+        [0, 0, 0],
+    ]
+    distances_norm = pairwise_distance(data, metric='jaccard')
+    distances_square = pairwise_distance(data, metric='jaccard', squareform=True)
+
+    assert list(squareform(distances_norm)) == list(distances_square)
+
+
+def test_equal():
+    distances = pairwise_distance([
+        [0, 0],
+        [1, 0],
+        [0, 0],
+        [1, 1],
+        [1, 0],
+        [0, 0],
+    ], metric='equal')
+    assert (distances == [
+        [1, 0, 1, 0, 0, 1],
+        [0, 1, 0, 0, 1, 0],
+        [1, 0, 1, 0, 0, 1],
+        [0, 0, 0, 1, 0, 0],
+        [0, 1, 0, 0, 1, 0],
+        [1, 0, 1, 0, 0, 1],
+    ]).all()
 
 
 @pytest.mark.parametrize("matrix", [
@@ -32,12 +85,31 @@ def test_simple_call():
     np.random.randint(2, size=(50, 50)),
     np.random.randint(2, size=(2, 100)),
 ])
-@pytest.mark.parametrize("metric", METRICS)
+@pytest.mark.parametrize("metric", SCIPY_METRICS)
 def test_noweight(matrix, metric):
     ours = pairwise_distance(matrix, metric=metric)
     matrix = np.asarray(matrix)
     theirs = cdist(matrix, matrix, metric=metric)
     assert_allclose(ours, theirs)
+
+
+@pytest.mark.parametrize("matrix", [
+    [[1, 0], [0, 1]],
+    [[0, 0], [0, 0]],
+    [[0,], [1,]],
+    [[1, 0], [1, 1]],
+    [[1, 1], [1, 1]],
+    #[[], []],
+    np.random.randint(2, size=(100, 2)),
+    np.random.randint(2, size=(50, 50)),
+    np.random.randint(2, size=(2, 100)),
+])
+@pytest.mark.parametrize("metric", SCIPY_METRICS)
+def test_squareform_variations(matrix, metric):
+    ours_normal = pairwise_distance(matrix, metric=metric)
+    ours_square = pairwise_distance(matrix, metric=metric, squareform=True)
+    theirs_square = squareform(ours_normal, checks=False)
+    assert_allclose(ours_square, theirs_square)
 
 
 @pytest.mark.parametrize("matrix, weights", [
@@ -50,7 +122,7 @@ def test_noweight(matrix, metric):
     (np.random.randint(2, size=(50, 50)), np.random.rand(50)),
     (np.random.randint(2, size=(2, 100)), np.random.rand(100)),
 ])
-@pytest.mark.parametrize("metric", METRICS)
+@pytest.mark.parametrize("metric", SCIPY_METRICS)
 def test_weight(matrix, weights, metric):
     if metric == 'sokalsneath' and any(np.asarray(matrix).sum(axis=1) == 0):
         return
@@ -73,7 +145,7 @@ def test_weight(matrix, weights, metric):
     (np.random.randint(2, size=(50, 50)), np.random.rand(50)),
     (np.random.randint(2, size=(2, 100)), np.random.rand(100)),
 ])
-@pytest.mark.parametrize("metric", METRICS)
+@pytest.mark.parametrize("metric", SCIPY_METRICS)
 @pytest.mark.parametrize("dtype, scale", [
     ('float32', 1), 
     ('float64', 1), 
@@ -105,7 +177,7 @@ def test_weight_dtypes(matrix, weights, metric, dtype, scale):
     np.random.randint(2, size=(50, 50)),
     np.random.randint(2, size=(2, 100)),
 ])
-@pytest.mark.parametrize("metric", METRICS)
+@pytest.mark.parametrize("metric", SCIPY_METRICS)
 @pytest.mark.parametrize("dtype, scale", [
     ('float32', 1), 
     ('float64', 1), 
@@ -119,3 +191,4 @@ def test_noweight_dtypes(matrix, metric, dtype, scale):
     if scale != 1:
        theirs = np.nan_to_num(theirs, nan=0)
     assert_allclose(ours, theirs * scale, atol=1.)
+
