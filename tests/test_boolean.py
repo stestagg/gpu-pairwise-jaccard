@@ -1,5 +1,6 @@
 import pytest
-from gpu_pairwise.boolean import pairwise_distance
+from gpu_pairwise import pairwise_distance
+from gpu_pairwise.boolean import _pack64
 from scipy.spatial.distance import cdist, squareform
 import numpy as np
 from numpy.testing import assert_allclose
@@ -21,38 +22,6 @@ SCIPY_METRICS = [
 def test_simple_call():
     distances = pairwise_distance([[1, 0], [1, 1]])
     assert (distances == [[0, 0.5], [0.5, 0]]).all()
-
-
-def test_squareform():
-    distances = pairwise_distance([
-        [0, 0],
-        [1, 0],
-        [0, 0],
-        [1, 1],
-        [1, 0],
-        [0, 0],
-    ], metric='equal', out_dtype='bool', squareform=True)
-
-    assert (list(distances) == [
-        False, True, False, False, True, 
-        False, False, True, False, 
-        False, False, True, 
-        False, False,
-        False
-    ])
-
-
-def test_squareform_jaccard():
-    data = [
-        [0, 0, 1],
-        [0, 1, 1],
-        [1, 1, 1],
-        [0, 0, 0],
-    ]
-    distances_norm = pairwise_distance(data, metric='jaccard')
-    distances_square = pairwise_distance(data, metric='jaccard', squareform=True)
-
-    assert list(squareform(distances_norm)) == list(distances_square)
 
 
 def test_equal():
@@ -86,30 +55,13 @@ def test_equal():
     np.random.randint(2, size=(2, 100)),
 ])
 @pytest.mark.parametrize("metric", SCIPY_METRICS)
-def test_noweight(matrix, metric):
+def test_noweight(matrix, metric):    
     ours = pairwise_distance(matrix, metric=metric)
     matrix = np.asarray(matrix)
     theirs = cdist(matrix, matrix, metric=metric)
+    np.fill_diagonal(theirs, 0)
     assert_allclose(ours, theirs)
 
-
-@pytest.mark.parametrize("matrix", [
-    [[1, 0], [0, 1]],
-    [[0, 0], [0, 0]],
-    [[0,], [1,]],
-    [[1, 0], [1, 1]],
-    [[1, 1], [1, 1]],
-    #[[], []],
-    np.random.randint(2, size=(100, 2)),
-    np.random.randint(2, size=(50, 50)),
-    np.random.randint(2, size=(2, 100)),
-])
-@pytest.mark.parametrize("metric", SCIPY_METRICS)
-def test_squareform_variations(matrix, metric):
-    ours_normal = pairwise_distance(matrix, metric=metric)
-    ours_square = pairwise_distance(matrix, metric=metric, squareform=True)
-    theirs_square = squareform(ours_normal, checks=False)
-    assert_allclose(ours_square, theirs_square)
 
 
 @pytest.mark.parametrize("matrix, weights", [
@@ -128,10 +80,11 @@ def test_weight(matrix, weights, metric):
         return
     if metric == 'sokalmichener':
         pytest.skip("scipy bug #13693")
-    ours = pairwise_distance(matrix, metric=metric, weights=weights)
+    ours = pairwise_distance(matrix, metric=metric, w=weights)
     matrix = np.asarray(matrix)
     weights = np.asarray(weights)
     theirs = cdist(matrix, matrix, metric=metric, w=weights)
+    np.fill_diagonal(theirs, 0)
     assert_allclose(ours, theirs)
 
 
@@ -141,6 +94,7 @@ def test_weight(matrix, weights, metric):
     ([[0,], [1,]], [1]),
     ([[1, 0], [1, 1]], [1, 0.2]),
     ([[1, 1], [1, 1]], [0.5, 0.5]),
+    (np.random.randint(2, size=(9, 9)), np.random.rand(9)),
     (np.random.randint(2, size=(100, 2)), np.random.rand(2)),
     (np.random.randint(2, size=(50, 50)), np.random.rand(50)),
     (np.random.randint(2, size=(2, 100)), np.random.rand(100)),
@@ -157,10 +111,11 @@ def test_weight_dtypes(matrix, weights, metric, dtype, scale):
         return
     if metric == 'sokalmichener':
         pytest.skip("scipy bug #13693")
-    ours = pairwise_distance(matrix, metric=metric, weights=weights, out_dtype=dtype)
+    ours = pairwise_distance(matrix, metric=metric, w=weights, out_dtype=dtype)
     matrix = np.asarray(matrix)
     weights = np.asarray(weights)
     theirs = cdist(matrix, matrix, metric=metric, w=weights)
+    np.fill_diagonal(theirs, 0)
     if scale != 1:
        theirs = np.nan_to_num(theirs, nan=0)
     assert_allclose(ours, theirs * scale, atol=1, )
@@ -173,6 +128,7 @@ def test_weight_dtypes(matrix, weights, metric, dtype, scale):
     [[1, 0], [1, 1]],
     [[1, 1], [1, 1]],
     #[[], []],
+    np.random.randint(2, size=(9, 9)),
     np.random.randint(2, size=(100, 2)),
     np.random.randint(2, size=(50, 50)),
     np.random.randint(2, size=(2, 100)),
@@ -188,7 +144,7 @@ def test_noweight_dtypes(matrix, metric, dtype, scale):
     ours = pairwise_distance(matrix, metric=metric, out_dtype=dtype)
     matrix = np.asarray(matrix)
     theirs = cdist(matrix, matrix, metric=metric)
+    np.fill_diagonal(theirs, 0)
     if scale != 1:
        theirs = np.nan_to_num(theirs, nan=0)
     assert_allclose(ours, theirs * scale, atol=1.)
-
